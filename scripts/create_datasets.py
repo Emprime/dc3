@@ -18,12 +18,18 @@
 """
 
 import collections
+import copy
+import json
+
+import cv2
 import gzip
 import os
 import tarfile
 import tempfile
+from os.path import join
 from urllib import request
 
+import imageio
 import numpy as np
 import scipy.io
 import tensorflow as tf
@@ -31,7 +37,7 @@ from absl import app
 from tqdm import trange
 
 from libml import data as libml_data
-from libml.utils import EasyDict
+from libml.utils import EasyDict, my_datasets, calc_size
 
 URLS = {
     'svhn': 'http://ufldl.stanford.edu/housenumbers/{}_32x32.mat',
@@ -104,6 +110,85 @@ def _load_stl10():
     return dict(train=train_set, test=test_set, unlabeled=unlabeled_set,
                 files=[EasyDict(filename="stl10_fold_indices.txt", data=fold_indices)])
 
+def _load_my_dataset(name):
+    def _load_internal():
+
+        dataset_path = "/data-ssd/%s" % name
+
+        def unflatten(images):
+            return np.transpose(images.reshape((-1, 3, 96, 96)),
+                                [0, 3, 2, 1])
+
+        unlabeled_data_available = os.path.exists(join(dataset_path, "unlabeled"))
+        test_data_available = os.path.exists(join(dataset_path, "test"))
+
+        folders = ["train","val"] + (["unlabeled"] if unlabeled_data_available else []) + (["test"] if test_data_available else [])
+        sets = []
+        indices = []
+
+        if not os.path.exists(dataset_path):
+            print("DATA NOT FOUND - STOP")
+            return None
+
+        for folder in folders:
+            classes = sorted([f for f in os.listdir(join(dataset_path,folder)) if os.path.isdir(join(dataset_path,folder,f)) ])
+
+            print(folder, classes)
+
+            imgs = []
+            labels = []
+            index = []
+            for i, cl in enumerate(sorted(classes)):
+                files = os.listdir(join(dataset_path,folder,cl))
+
+                for file in sorted(files):
+                    file_name = join(dataset_path,folder,cl,file)
+                    im = imageio.imread(file_name)
+
+                    w_h = calc_size(name)
+
+                    im = cv2.resize(im, (w_h[1], w_h[0]))
+
+                    if im.ndim == 2:
+                        # should be loaded as bgr instead of grayscale
+                        im = cv2.cvtColor(im, cv2.COLOR_GRAY2BGR)
+
+                    imgs.append(im)
+                    labels.append(i)
+                    index.append(file_name)
+
+            set_entry = {'images': np.array(imgs),
+                         'labels': np.array(labels)}
+            sets.append(set_entry)
+            indices.append(json.dumps(index))
+
+
+        train_set = sets[0]
+        test_set = sets[1]
+
+
+        train_set['images'] = _encode_png(train_set['images'] )
+        test_set['images'] = _encode_png(test_set['images'])
+
+        result = dict(train=train_set, test=test_set,
+                    files=[EasyDict(filename="%s_train_indices.txt" % name, data=indices[0]),
+                           EasyDict(filename="%s_test_indices.txt" % name, data=indices[1]),
+                           ])
+        if unlabeled_data_available:
+            unlabeled_set = sets[2]
+            unlabeled_set['images'] = _encode_png(unlabeled_set['images'])
+            result["unlabeled"] = unlabeled_set
+            result["files"].append(EasyDict(filename="%s_unlabeled_indices.txt" % name, data=indices[2]))
+
+        if test_data_available:
+            unlabeled_set = sets[-1]
+            unlabeled_set['images'] = _encode_png(unlabeled_set['images'])
+            result["evaluation"] = unlabeled_set
+            result["files"].append(EasyDict(filename="%s_evaluation_indices.txt" % name, data=indices[-1]))
+
+        return result
+
+    return _load_internal
 
 def _load_cifar10():
     def unflatten(images):
@@ -221,19 +306,25 @@ def _is_installed_folder(name, folder):
 
 
 CONFIGS = dict(
-    cifar10=dict(loader=_load_cifar10, checksums=dict(train=None, test=None)),
-    cifar100=dict(loader=_load_cifar100, checksums=dict(train=None, test=None)),
-    svhn=dict(loader=_load_svhn, checksums=dict(train=None, test=None, extra=None)),
-    stl10=dict(loader=_load_stl10, checksums=dict(train=None, test=None)),
+    # commented out because not of interest
+    # cifar10=dict(loader=_load_cifar10, checksums=dict(train=None, test=None)),
+    # cifar100=dict(loader=_load_cifar100, checksums=dict(train=None, test=None)),
+    # svhn=dict(loader=_load_svhn, checksums=dict(train=None, test=None, extra=None)),
+    # stl10=dict(loader=_load_stl10, checksums=dict(train=None, test=None)),
 )
 
 
 def main(argv):
+    # add my datasets
+    for name in my_datasets:
+        CONFIGS[name] = {"loader": _load_my_dataset(name), "checksums": dict(train=None, test=None)}
+
     if len(argv[1:]):
         subset = set(argv[1:])
     else:
         subset = set(CONFIGS.keys())
     tf.gfile.MakeDirs(libml_data.DATA_DIR)
+
     for name, config in CONFIGS.items():
         if name not in subset:
             continue
@@ -246,6 +337,9 @@ def main(argv):
             continue
         print('Preparing', name)
         datas = config['loader']()
+        if datas is None:
+            # save guard against ill loaders
+            continue
         saver = config.get('saver', _save_as_tfrecord)
         for sub_name, data in datas.items():
             if sub_name == 'readme':

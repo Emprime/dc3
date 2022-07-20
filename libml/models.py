@@ -18,7 +18,8 @@ import itertools
 import tensorflow as tf
 from absl import flags
 
-from libml import layers
+from libml import layers, data
+from libml.resnet_common import ResNet50V2
 from libml.train import ClassifySemi
 from libml.utils import EasyDict
 
@@ -55,9 +56,8 @@ class CNN13(ClassifySemi):
             y = tf.layers.conv2d(y, 1 * filters, kernel_size=1, activation=tf.nn.leaky_relu, padding='same')
             y = tf.layers.batch_normalization(y, **bn_args)
             y = tf.reduce_mean(y, [1, 2])  # (b, 6, 6, 128) -> (b, 128)
-            logits = tf.layers.dense(y, self.nclass)
+            logits = tf.layers.dense(y, self.calculate_num_outputs())
         return EasyDict(logits=logits, embeds=y)
-
 
 class ResNet(ClassifySemi):
     def classifier(self, x, scales, filters, repeat, training, getter=None, dropout=0, **kwargs):
@@ -94,7 +94,7 @@ class ResNet(ClassifySemi):
             y = embeds = tf.reduce_mean(y, [1, 2])
             if dropout and training:
                 y = tf.nn.dropout(y, 1 - dropout)
-            logits = tf.layers.dense(y, self.nclass, kernel_initializer=tf.glorot_normal_initializer())
+            logits = tf.layers.dense(y, self.calculate_num_outputs(), kernel_initializer=tf.glorot_normal_initializer())
         return EasyDict(logits=logits, embeds=embeds)
 
 
@@ -141,7 +141,7 @@ class ShakeNet(ClassifySemi):
             y = embeds = tf.reduce_mean(y, [1, 2])
             if dropout and training:
                 y = tf.nn.dropout(y, 1 - dropout)
-            logits = tf.layers.dense(y, self.nclass, kernel_initializer=tf.glorot_normal_initializer())
+            logits = tf.layers.dense(y, self.calculate_num_outputs(), kernel_initializer=tf.glorot_normal_initializer())
         return EasyDict(logits=logits, embeds=embeds)
 
 

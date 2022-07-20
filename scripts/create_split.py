@@ -29,6 +29,7 @@ from tqdm import trange, tqdm
 
 from libml import data as libml_data
 from libml import utils
+from libml.utils import calc_needs_balancing
 
 flags.DEFINE_integer('seed', 0, 'Random seed to use, 0 for no shuffling.')
 flags.DEFINE_integer('size', 0, 'Size of labelled set.')
@@ -52,7 +53,7 @@ def main(argv):
     count = 0
     id_class = []
     class_id = defaultdict(list)
-    print('Computing class distribution')
+    print('Computing class distribution %s' % argv[0])
     dataset = tf.data.TFRecordDataset(input_files).map(get_class, 4).batch(1 << 10)
     it = dataset.make_one_shot_iterator().get_next()
     try:
@@ -71,7 +72,7 @@ def main(argv):
     assert min(class_id.keys()) == 0 and max(class_id.keys()) == (nclass - 1)
     train_stats = np.array([len(class_id[i]) for i in range(nclass)], np.float64)
     train_stats /= train_stats.max()
-    if 'stl10' in argv[1]:
+    if 'stl10' in argv[1] or calc_needs_balancing(argv[0].split("SSL2/")):
         # All of the unlabeled data is given label 0, but we know that
         # STL has equally distributed data among the 10 classes.
         train_stats[:] = 1
@@ -84,13 +85,28 @@ def main(argv):
         for i in range(nclass):
             np.random.shuffle(class_id[i])
 
+    if FLAGS.size == -1:
+        # use complete dataset
+        FLAGS.size = count
+
     # Distribute labels to match the input distribution.
-    npos = np.zeros(nclass, np.int64)
+    npos = np.zeros(nclass, np.int64) # count how many used per class
     label = []
     for i in range(FLAGS.size):
-        c = np.argmax(train_stats - npos / max(npos.max(), 1))
-        label.append(class_id[c][npos[c]])
+        c = np.argmax(train_stats - npos / max(npos.max(), 1)) # chose class based on currently used and input distribution
+        try:
+            label.append(class_id[c][npos[c]])
+        except IndexError:
+            # might occur due to using all datasets and naive selection of c
+            # just add random one which is availabel
+            print("WARINING: Index error due to using all or almost all data")
+            c = np.argmax([len(class_id[j]) - npos[j] for j in range(nclass)])
+            label.append(class_id[c][npos[c]])
+
         npos[c] += 1
+
+    print("labels: ", label[:10])
+    print("count: ", len(label))
 
     del npos, class_id
     label = frozenset([int(x) for x in label])
@@ -103,7 +119,7 @@ def main(argv):
     with tf.python_io.TFRecordWriter(target + '-label.tfrecord') as writer_label:
         pos, loop = 0, trange(count, desc='Writing records')
         for input_file in input_files:
-            for record in tf.python_io.tf_record_iterator(input_file):
+            for record in tf.python_io.tf_record_iterator(input_file): # step through orginal file and store based on the order in orginal file
                 if pos in label:
                     writer_label.write(record)
                 pos += 1

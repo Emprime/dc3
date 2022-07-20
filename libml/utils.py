@@ -14,7 +14,9 @@
 """Utilities."""
 
 import os
+import pickle
 import re
+from os.path import join
 
 import numpy as np
 import tensorflow as tf
@@ -239,3 +241,130 @@ def combine_dicts(*args):
     for d in args:
         result.update(d)
     return result
+
+def save_list(log_dir, name, list, save_float = False, save_string=False):
+    """
+    save list to path with name and timestamp
+    :param name:
+    :param out_path:
+    :param list:
+    :return:
+    """
+
+    # can save as numpy list if is numpy, at most 2 dimensions and number values
+    save_as_csv = type(list) is np.ndarray and list.ndim <= 2
+    file = join(log_dir, "%s.%s" % (name, "csv" if save_as_csv else 'pkl'))
+    if save_as_csv:
+        if not save_float and not save_string:
+            np.savetxt(file, list.astype(int), delimiter=',', fmt="%i")
+        if save_float:
+            np.savetxt(file, list, delimiter=',', fmt="%0.5f")
+        if save_string:
+            np.savetxt(file, list, delimiter=',', fmt="%s")
+
+    else:
+        with open(file, 'wb') as f:
+            pickle.dump(list, f)
+
+def load_list(log_dir, name, is_string=False):
+    possible_files = os.listdir(log_dir)
+    # print(possible_files)
+    # print(name)
+
+    for file in possible_files:
+        if name in file:
+            # open file
+            # print("open %s" % file)
+            complete_path = join(log_dir,file)
+            if ".csv" in file:
+                list = np.loadtxt(complete_path, delimiter=',', dtype=str if is_string else float, comments="§")
+            else:
+                with open(complete_path, 'rb') as f:
+                    list = pickle.load(f)
+
+            # return
+            return list
+    return None
+
+def combine_file_name(*parts):
+    """
+    combine filename with parts, but ignore nones
+    :param parts:
+    :return:
+    """
+
+    parts = [p for p in parts if p is not None]
+
+    return "_".join(parts)
+
+
+my_datasets = ['cifar10h', 'miceBone', 'plankton', 'turkey']
+
+my_class_labels = {
+    'turkey': sorted(['0','1']),
+    "cifar10h" :  sorted(['bird', 'truck', 'automobile', 'airplane', 'dog', 'deer', 'cat', 'ship', 'frog', 'horse']),
+    "miceBone":  sorted(['nr', 'g', 'ug']),
+    "plankton" : sorted(['cop', 'pro_rhizaria_phaeodaria', 'collodaria_black', 'phyto_puff', 'det', 'no_fit', 'shrimp', 'bubbles', 'phyto_tuft', 'collodaria_globule']),
+    }
+
+
+my_class_weights = {"cifar10h" : [1,1,1,1,1, 1,1,1,1,1],
+                   "miceBone":  [108, 453, 163],
+                   "plankton" :  [514, 853, 709, 1405, 1057, 3710, 572, 1602, 1115, 743],
+                    "turkey" :  [1300, 6740],
+                   }
+
+
+def calc_needs_balancing(name):
+    if "balanced" in name:
+        return True
+    return False
+
+def calc_size(name):
+    """
+
+    :param name:
+    :return: w, h
+    """
+    w_h = (96,96)
+    if "cifar10h" in name:
+        w_h = (32,32)
+    if "miceBone" in name:
+        w_h = (192,192)
+    return w_h
+
+def calc_class_weights(name):
+    """
+    calculate the class weights for given dataset name
+    :param name:
+    :return:
+    """
+
+    assert name in my_datasets
+
+    for key in my_class_weights:
+        if key in name:
+
+            # get numbers
+            numbers = np.array(my_class_weights[key])
+
+            weights =  np.sum(numbers) / (len(numbers) * numbers)
+            print(f"Use weights {weights} for {name}")
+            return weights
+
+    assert False, "Should not be reached, the given dataset has no class labels provided for %s in %s" % (name,my_class_weights)
+
+def calc_class_label(name):
+    """
+    calculate the class labels for given dataset name
+    :param name:
+    :return:
+    """
+
+    assert name in my_datasets
+
+    for key in my_class_labels:
+        if key in name:
+            return my_class_labels[key]
+
+    assert False, "Should not be reached, the given dataset has no class labels provided"

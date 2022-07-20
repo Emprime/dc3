@@ -23,6 +23,7 @@ import numpy as np
 import tensorflow as tf
 from absl import flags
 
+import libml.utils
 from libml import utils, ctaugment
 from libml.utils import EasyDict
 from third_party.auto_augment import augmentations, policies
@@ -353,6 +354,10 @@ DEFAULT_AUGMENT = EasyDict(
     svhn_noextra=AugmentPair(tf=lambda x: dict(image=Primitives.s(4)(x), label=x['label'], index=x.get('index', -1)),
                              numpy=AugmentPool),
 )
+for data in libml.utils.my_datasets:
+    DEFAULT_AUGMENT[data] = AugmentPair(tf=lambda x: dict(image=Primitives.ms(12)(x), label=x['label'], index=x.get('index', -1)),
+                      numpy=AugmentPool)
+
 AUTO_AUGMENT = EasyDict({
     k: AugmentPair(tf=v.tf, numpy=functools.partial(AugmentPoolAA, policy_group=k))
     for k, v in DEFAULT_AUGMENT.items()

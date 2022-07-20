@@ -27,6 +27,7 @@ from absl import app
 from tqdm import trange, tqdm
 
 from libml import utils
+from libml.utils import calc_needs_balancing
 
 
 def get_class(serialized_example):
@@ -36,13 +37,19 @@ def get_class(serialized_example):
 def main(argv):
     argv.pop(0)
     if any(not tf.gfile.Exists(f) for f in argv[1:]):
-        raise FileNotFoundError(argv[1:])
+
+        if "-unlabeled" in argv[2]:
+            # skip this, because use also supervised setting
+            input_files = [argv[1]]
+        else:
+            raise FileNotFoundError(argv[1:])
+    else:
+        input_files = argv[1:]
     target = argv[0]
-    input_files = argv[1:]
     count = 0
     id_class = []
     class_id = defaultdict(list)
-    print('Computing class distribution')
+    print('Computing class distribution %s' % target)
     dataset = tf.data.TFRecordDataset(input_files).map(get_class, 4).batch(1 << 10)
     it = dataset.make_one_shot_iterator().get_next()
     try:
@@ -61,7 +68,7 @@ def main(argv):
     assert min(class_id.keys()) == 0 and max(class_id.keys()) == (nclass - 1)
     train_stats = np.array([len(class_id[i]) for i in range(nclass)], np.float64)
     train_stats /= train_stats.max()
-    if 'stl10' in argv[1]:
+    if 'stl10' in argv[1] or calc_needs_balancing(target.split("SSL2/")[1]):
         # All of the unlabeled data is given label 0, but we know that
         # STL has equally distributed data among the 10 classes.
         train_stats[:] = 1

@@ -22,6 +22,9 @@ from tqdm import trange
 
 from cta.cta_remixmatch import CTAReMixMatch
 from libml import data, utils, augment, ctaugment
+from libml.overclustering_training import split_normal_over, get_ops, over_flags, get_loss_scales, \
+    weighted_cross_entropy
+from src.utils.losses import inverse_ce
 
 FLAGS = flags.FLAGS
 
@@ -76,13 +79,14 @@ class FixMatch(CTAReMixMatch):
                               leave=False, unit='img', unit_scale=batch,
                               desc='Epoch %d/%d' % (1 + (self.tmp.step // report_nimg), train_nimg // report_nimg))
                 for _ in loop:
+                    self.epoch = 1 + (self.tmp.step // report_nimg)
                     self.train_step(train_session, gen_labeled, gen_unlabeled)
                     while self.tmp.print_queue:
                         loop.write(self.tmp.print_queue.pop(0))
             while self.tmp.print_queue:
                 print(self.tmp.print_queue.pop(0))
 
-    def model(self, batch, lr, wd, wu, confidence, uratio, ema=0.999, **kwargs):
+    def model(self, batch, lr, wd, wu,  confidence, uratio, ema=0.999, **kwargs): #wol, wou, ceinv_labels, over_alternating,
         hwc = [self.dataset.height, self.dataset.width, self.dataset.colors]
         xt_in = tf.placeholder(tf.float32, [batch] + hwc, 'xt')  # Training labeled
         x_in = tf.placeholder(tf.float32, [None] + hwc, 'x')  # Eval images
@@ -97,15 +101,24 @@ class FixMatch(CTAReMixMatch):
         classifier = lambda x, **kw: self.classifier(x, **kw, **kwargs).logits
         skip_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
         x = utils.interleave(tf.concat([xt_in, y_in[:, 0], y_in[:, 1]], 0), 2 * uratio + 1)
-        logits = utils.para_cat(lambda x: classifier(x, training=True), x)
+        logits = utils.para_cat(lambda x: classifier(x, training=True), x) # parallel execution
         logits = utils.de_interleave(logits, 2 * uratio+1)
         post_ops = [v for v in tf.get_collection(tf.GraphKeys.UPDATE_OPS) if v not in skip_ops]
         logits_x = logits[:batch]
         logits_weak, logits_strong = tf.split(logits[batch:], 2)
         del logits, skip_ops
 
+        logits_x, logits_x_over,  prob_fuzzy_train = split_normal_over(logits_x, self.nclass,self.overcluster_k,  batch * uratio,  combined=FLAGS.combined_output)
+        logits_weak, logits_weak_over, prob_fuzzy = \
+            split_normal_over(logits_weak, self.nclass, self.overcluster_k, batch * uratio, combined=FLAGS.combined_output,  verbose=1)
+        logits_strong, logits_strong_over, _ = \
+            split_normal_over(logits_strong, self.nclass, self.overcluster_k, batch * uratio, combined=FLAGS.combined_output)
+
+        certain_scale, fuzzy_scale = get_loss_scales(prob_fuzzy)
+
         # Labeled cross-entropy
-        loss_xe = tf.nn.sparse_softmax_cross_entropy_with_logits(labels=l_in, logits=logits_x)
+        # loss_xe = tf.nn.sparse_softmax_cross_entropy_with_logits(labels=l_in, logits=logits_x)
+        loss_xe = weighted_cross_entropy(labels=l_in, logits=logits_x, dataset_root_name = self.dataset._root_name)
         loss_xe = tf.reduce_mean(loss_xe)
         tf.summary.scalar('losses/xe', loss_xe)
 
@@ -115,7 +128,7 @@ class FixMatch(CTAReMixMatch):
                                                                   logits=logits_strong)
         pseudo_mask = tf.to_float(tf.reduce_max(pseudo_labels, axis=1) >= confidence)
         tf.summary.scalar('monitors/mask', tf.reduce_mean(pseudo_mask))
-        loss_xeu = tf.reduce_mean(loss_xeu * pseudo_mask)
+        loss_xeu = tf.reduce_mean(loss_xeu * pseudo_mask * certain_scale)
         tf.summary.scalar('losses/xeu', loss_xeu)
 
         # L2 regularization
@@ -127,15 +140,14 @@ class FixMatch(CTAReMixMatch):
         ema_getter = functools.partial(utils.getter_ema, ema)
         post_ops.append(ema_op)
 
-        train_op = tf.train.MomentumOptimizer(lr, 0.9, use_nesterov=True).minimize(
-            loss_xe + wu * loss_xeu + wd * loss_wd, colocate_gradients_with_ops=True)
-        with tf.control_dependencies([train_op]):
-            train_op = tf.group(*post_ops)
-
-        return utils.EasyDict(
-            xt=xt_in, x=x_in, y=y_in, label=l_in, train_op=train_op,
-            classify_raw=tf.nn.softmax(classifier(x_in, training=False)),  # No EMA, for debugging.
-            classify_op=tf.nn.softmax(classifier(x_in, getter=ema_getter, training=False)))
+        return get_ops(loss_xe + wu * loss_xeu + wd * loss_wd,
+                       post_ops=post_ops, ema_getter=ema_getter, lr=lr, classifier=classifier,
+                       logits_x = logits_x, logits_x_over_all = logits_x_over,
+                       logits_u = logits_weak, logits_u_over_all= logits_weak_over,
+                       nclass=self.nclass, batch=batch, overcluster_k=self.overcluster_k,
+                       xt_in=xt_in, x_in=x_in, y_in=y_in, l_in=l_in,
+                       uratio=uratio, pseudo_labels = pseudo_labels, pseudo_mask=pseudo_mask, prob_fuzzy=prob_fuzzy,
+                       logits_u2=logits_strong, logits_u2_over_all=logits_strong_over,prob_fuzzy_train=prob_fuzzy_train)
 
 
 def main(argv):
@@ -144,7 +156,7 @@ def main(argv):
     dataset = data.PAIR_DATASETS()[FLAGS.dataset]()
     log_width = utils.ilog2(dataset.width)
     model = FixMatch(
-        os.path.join(FLAGS.train_dir, dataset.name, FixMatch.cta_name()),
+        FLAGS.train_dir,
         dataset,
         lr=FLAGS.lr,
         wd=FLAGS.wd,
@@ -156,9 +168,10 @@ def main(argv):
         uratio=FLAGS.uratio,
         scales=FLAGS.scales or (log_width - 2),
         filters=FLAGS.filters,
-        repeat=FLAGS.repeat)
+        repeat=FLAGS.repeat,
+        **over_flags())
     model.train(FLAGS.train_kimg << 10, FLAGS.report_kimg << 10)
-
+    model.eval_checkpoint()
 
 if __name__ == '__main__':
     utils.setup_tf()

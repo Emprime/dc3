@@ -39,6 +39,8 @@ from libml.augment import AugmentPair, NOAUGMENT
 # If you directly import DATA_DIR:
 #   from libml.data import DATA_DIR
 # then None will be imported.
+from libml.utils import my_datasets, calc_class_label, calc_size
+
 DATA_DIR = None
 
 _DATA_CACHE = None
@@ -146,7 +148,7 @@ class DataSet:
                     sloppy=True))
         else:
             dataset = tf.data.TFRecordDataset(filenames)
-        return cls(dataset,
+        return cls(tf.data.TFRecordDataset(filenames),
                    augment_fn=augment_fn,
                    parse_fn=parse_fn,
                    image_shape=image_shape)
@@ -223,10 +225,14 @@ class DataSet:
 
 class DataSets:
     def __init__(self, name, train_labeled: DataSet, train_unlabeled: DataSet, test: DataSet, valid: DataSet,
-                 height=32, width=32, colors=3, nclass=10, mean=0, std=1, p_labeled=None, p_unlabeled=None):
+                 height=32, width=32, colors=3, nclass=10, mean=0, std=1, p_labeled=None, p_unlabeled=None, _train_data=None, _unlabeled_data=None, _root_name=None, evaluation_data=None):
         self.name = name
+        self._root_name = _root_name
         self.train_labeled = train_labeled
         self.train_unlabeled = train_unlabeled
+        # self._train_data = _train_data # used for evaluation only
+        self._unlabeled_data = _unlabeled_data # used for evaluation only
+        self.evaluation_data  = evaluation_data # used for evaluation of benchmark
         self.test = test
         self.valid = valid
         self.height = height
@@ -257,8 +263,13 @@ class DataSets:
             image_shape = [height, width, colors]
             train_labeled = DataSet.from_files(
                 [root + fullname + '-label.tfrecord'], augment[0], parse_fn, image_shape)
-            train_unlabeled = DataSet.from_files(
-                [root + '-unlabel.tfrecord'], augment[1], parse_fn, image_shape)
+            if os.path.exists(root + '-unlabel.tfrecord'):
+                train_unlabeled = DataSet.from_files(
+                    [root + '-unlabel.tfrecord'], augment[1], parse_fn, image_shape)
+            else:
+                # DIRTY use labeled data again
+                train_unlabeled = DataSet.from_files(
+                    [root + '-label.tfrecord'], augment[1], parse_fn, image_shape)
             if do_memoize:
                 train_labeled = train_labeled.memoize()
                 train_unlabeled = train_unlabeled.memoize()
@@ -270,6 +281,20 @@ class DataSets:
 
             test_data = DataSet.from_files(
                 [os.path.join(DATA_DIR, '%s-test.tfrecord' % name)], NOAUGMENT, parse_fn, image_shape=image_shape)
+            print("directory ", os.path.join(DATA_DIR, '%s-evaluation.tfrecord' % name), os.path.exists(os.path.join(DATA_DIR, '%s-evaluation.tfrecord' % name)))
+            if os.path.exists(os.path.join(DATA_DIR, '%s-evaluation.tfrecord' % name)):
+                evaluation_data = DataSet.from_files(
+                    [os.path.join(DATA_DIR, '%s-evaluation.tfrecord' % name)], NOAUGMENT, parse_fn, image_shape=image_shape)
+            else:
+                evaluation_data = None
+            # _train_data = DataSet.from_files(
+            #     [os.path.join(DATA_DIR, '%s-train.tfrecord' % name)], NOAUGMENT, parse_fn, image_shape=image_shape)
+
+            if os.path.exists(os.path.join(DATA_DIR, '%s-unlabeled.tfrecord' % name)):
+                _unlabeled_data = DataSet.from_files(
+                    [os.path.join(DATA_DIR, '%s-unlabeled.tfrecord' % name)], NOAUGMENT, parse_fn, image_shape=image_shape)
+            else:
+                _unlabeled_data = None
 
             return cls(name + '.' + FLAGS.augment + fullname + '-' + str(valid)
                        + ('/' + FLAGS.p_unlabeled if FLAGS.p_unlabeled else ''),
@@ -278,7 +303,8 @@ class DataSets:
                        valid=train_unlabeled.take(valid),
                        test=test_data,
                        nclass=nclass, p_labeled=p_labeled, p_unlabeled=p_unlabeled,
-                       height=height, width=width, colors=colors, mean=mean, std=std)
+                       height=height, width=width, colors=colors, mean=mean, std=std,_unlabeled_data=_unlabeled_data,  _root_name = name, evaluation_data=evaluation_data
+                       )
 
         return name + fullname + '-' + str(valid), create
 
@@ -298,6 +324,15 @@ def create_datasets(augment_fn):
               for seed, label, valid in itertools.product(range(6), [10 * x for x in SAMPLES_PER_CLASS], [1, 5000])])
     d.update([DataSets.creator('svhn_noextra', seed, label, valid, augment_fn)
               for seed, label, valid in itertools.product(range(6), [10 * x for x in SAMPLES_PER_CLASS], [1, 5000])])
+
+    for data in my_datasets:
+        w_h = calc_size(data)
+
+        d.update([DataSets.creator(data, seed, label, valid, augment_fn, nclass=len(calc_class_label(data)), height=w_h[0], width=w_h[1])
+              for seed, label, valid in itertools.product(range(6), [-1, 4000], [1, 10, 100,  1000, 5000])])
+
+    # print(d.keys())
+
     return d
 
 
