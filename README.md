@@ -35,6 +35,11 @@ By default the GPU with the index 0 is used to run these elements. If you have n
 You can run the experiments within the docker container with the commands below
 ```
 
+    # Before you can start anything you need to export some enviroment variables for the fixmatch repository source code
+    export ML_DATA=/data-ssd/fixmatch
+    export PYTHONPATH=$PYTHONPATH:.
+
+
     # original source code SSL method e.g. mean teacher
     # this uses additional weighted cross entropy for unbalanced datasets
     

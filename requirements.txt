@@ -8,3 +8,4 @@ scipy
 pillow
 opencv-python
 imageio
+scikit-learn

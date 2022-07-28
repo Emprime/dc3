@@ -358,7 +358,7 @@ class ClassifySemi(Model):
         :return:
         """
 
-        log_dir = f"/data1/{self.log_time}/{epoch}"
+        log_dir = f"/data1/{self.log_time}/ep-{epoch}"
 
         # load indices
         if subset == "train_labeled":
@@ -385,6 +385,9 @@ class ClassifySemi(Model):
 
             assert len(file_names) == len(labels), "%s -> %d vs. %d" % (subset, len(file_names), len(labels))
             # TODO might not be correct if train samples are more than 10,000 (see caching above)
+
+            os.makedirs(log_dir, exist_ok=True)
+            print(f"log {prefix} {eval_method} {suffix}  to {log_dir}")
 
             save_list(log_dir, combine_file_name(prefix, eval_method, "gt", suffix), np.array(labels))
             save_list(log_dir, combine_file_name(prefix, eval_method,  "files", suffix), np.array(file_names),

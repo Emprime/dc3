@@ -6,7 +6,7 @@ from absl import flags
 
 from libml import utils
 from libml.utils import EasyDict
-from src.utils.losses import inverse_ce
+from tensorflow.python.keras import backend as K
 
 FLAGS = flags.FLAGS
 
@@ -30,6 +30,23 @@ flags.DEFINE_integer('use_soft_prob', 1, 'use soft probabilites for certain and 
 
 flags.DEFINE_integer('use_weighted_xe',1, 'Use on the labeled training data the weighted version of xe')
 
+
+def inverse_ce(y_true, y_pred):
+    """
+    new loss for foc frametwork
+    :param y_true:
+    :param y_pred:
+    :return:
+    """
+    y = K.clip(y_true, K.epsilon(), 1 - K.epsilon())
+    x = K.clip(y_pred, K.epsilon(), 1 - K.epsilon())
+
+    # x_inv = K.softmax(1-x)
+    x_inv = 1-x
+
+    inv_ce = -K.sum(y * K.log(x_inv), axis=1)
+
+    return inv_ce
 
 
 def weighted_cross_entropy(labels, logits, dataset_root_name):

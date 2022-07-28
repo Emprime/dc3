@@ -19,7 +19,6 @@ import tensorflow as tf
 from absl import flags
 
 from libml import layers, data
-from libml.resnet_common import ResNet50V2
 from libml.train import ClassifySemi
 from libml.utils import EasyDict
 
