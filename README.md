@@ -2,6 +2,8 @@
 
 Code for the paper: "[A data-centric approach for improving ambiguous labels with combined semi-supervised classification and clustering](https://arxiv.org/abs/2106.16209)" by Lars Schmarje,  Monty Santarossa, Simon-Martin Schröder, Claudius Zelenka, Rainer Kiko, Jenny Stracke, Nina Volkmann and Reinhard Koch
 
+Datasets available [here](https://zenodo.org/record/5550917)
+
 The code is extended / forked version of the official FixMatch repository. The full original README is given in `deprecated_README.md`:
 
 ## Setup
@@ -72,7 +74,7 @@ Additional notes for running the experiments:
 @Article{schmarje2022dc3,
 AUTHOR = {Schmarje, Lars and Santarossa, Monty and Schröder, Simon-Martin and Zelenka, Claudius and Kiko, Rainer and Stracke, Jenny and Volkmann, Nina and Koch, Reinhard},
 TITLE = {A data-centric approach for improving ambiguous labels with combined semi-supervised classification and clustering},
-JOURNAL = {Arxiv},
+JOURNAL = {Proceedings of the European Conference on Computer Vision (ECCV)},
 YEAR = {2022},
 }
 ```
