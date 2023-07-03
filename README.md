@@ -71,10 +71,13 @@ Additional notes for running the experiments:
 ## Citing this work
 
 ```bibtex
-@Article{schmarje2022dc3,
-AUTHOR = {Schmarje, Lars and Santarossa, Monty and Schröder, Simon-Martin and Zelenka, Claudius and Kiko, Rainer and Stracke, Jenny and Volkmann, Nina and Koch, Reinhard},
-TITLE = {A data-centric approach for improving ambiguous labels with combined semi-supervised classification and clustering},
-JOURNAL = {Proceedings of the European Conference on Computer Vision (ECCV)},
-YEAR = {2022},
+@inproceedings{schmarje2022dc3,
+  title={A data-centric approach for improving ambiguous labels with combined semi-supervised classification and clustering},
+  author={Schmarje, Lars and Santarossa, Monty and Schr{\"o}der, Simon-Martin and Zelenka, Claudius and Kiko, Rainer and Stracke, Jenny and Volkmann, Nina and Koch, Reinhard},
+  booktitle={European Conference on Computer Vision},
+  pages={363--380},
+  year={2022},
+  organization={Springer}
 }
+
 ```
